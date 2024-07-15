@@ -1,0 +1,181 @@
+---
+- name: Server Health Check
+  hosts: equipos
+  become: yes
+  vars:
+    failures: []
+    ansible_user: prueba
+
+  tasks:
+    - name: Check CPU Usage
+      shell: "top -bn1 | grep 'Cpu(s)' | awk '{print $2 + $4}'"
+      register: cpu_usage
+      failed_when: false
+      changed_when: cpu_usage.stdout | float > 80
+    - name: Evaluate CPU Usage
+      debug:
+        msg: "High CPU usage: {{ cpu_usage.stdout }}%"
+      when: cpu_usage.stdout | float > 80
+      failed_when: cpu_usage.stdout | float > 80
+      ignore_errors: yes
+      register: cpu_check_result
+    - name: Record CPU Usage Failure
+      set_fact:
+        failures: "{{ failures + ['High CPU usage: ' ~ cpu_usage.stdout ~ '%'] }}"
+      when: cpu_check_result is failed
+
+    - name: Check Memory Usage
+      shell: "free -m | awk 'NR==2{printf \"%s\", $3*100/$2 }'"
+      register: memory_usage
+      failed_when: false
+      changed_when: memory_usage.stdout | float > 80
+    - name: Evaluate Memory Usage
+      debug:
+        msg: "High Memory usage: {{ memory_usage.stdout }}%"
+      when: memory_usage.stdout | float > 80
+      failed_when: memory_usage.stdout | float > 80
+      ignore_errors: yes
+      register: memory_check_result
+    - name: Record Memory Usage Failure
+      set_fact:
+        failures: "{{ failures + ['High Memory usage: ' ~ memory_usage.stdout ~ '%'] }}"
+      when: memory_check_result is failed
+
+    - name: Check Disk Space for all disks except tmpfs
+      shell: df -h | grep -vE '^Filesystem|tmpfs|cdrom' | awk '{print $5 " " $6}' | while read output; do usep=$(echo $output | awk '{print $1}' | tr -d '%'); partition=$(echo $output | awk '{print $2}'); if [ $usep -ge 90 ]; then echo "$partition $usep"; fi; done
+      register: disk_space
+      failed_when: false
+
+    - name: Evaluate Disk Space
+      debug:
+        msg: "Low Disk Space: {{ disk_space.stdout }}"
+      when: disk_space.stdout != ""
+      ignore_errors: yes
+      register: disk_space_check_result
+
+    - name: Record Disk Space Failure
+      set_fact:
+        failures: "{{ failures + ['Low Disk Space: ' ~ disk_space.stdout] }}"
+      when: disk_space.stdout != ""
+
+    - name: Check Network Status
+      shell: "ip link show | grep 'state DOWN'"
+      register: network_status
+      failed_when: false
+    - name: Evaluate Network Status
+      debug:
+        msg: "Network interfaces down: {{ network_status.stdout }}"
+      when: network_status.stdout != ""
+      failed_when: network_status.stdout != ""
+      ignore_errors: yes
+      register: network_status_check_result
+    - name: Record Network Status Failure
+      set_fact:
+        failures: "{{ failures + ['Network interfaces down: ' ~ network_status.stdout] }}"
+      when: network_status_check_result is failed
+
+    - name: Check Network Latency
+      shell: "ping -c 4 8.8.8.8 | tail -1| awk '{print $4}' | cut -d '/' -f 2"
+      register: network_latency
+      failed_when: false
+      changed_when: network_latency.stdout | float > 100
+    - name: Evaluate Network Latency
+      debug:
+        msg: "High Network Latency: {{ network_latency.stdout }} ms"
+      when: network_latency.stdout | float > 100
+      failed_when: network_latency.stdout | float > 100
+      ignore_errors: yes
+      register: network_latency_check_result
+    - name: Record Network Latency Failure
+      set_fact:
+        failures: "{{ failures + ['High Network Latency: ' ~ network_latency.stdout ~ ' ms'] }}"
+      when: network_latency_check_result is failed
+
+    - name: Check Disk Latency
+      shell: "iostat -dx 1 1 | awk '$1 == \"sda\" {print $10}'"
+      register: disk_latency
+      failed_when: false
+      changed_when: disk_latency.stdout | float > 10
+    - name: Evaluate Disk Latency
+      debug:
+        msg: "High Disk Latency: {{ disk_latency.stdout }} ms"
+      when: disk_latency.stdout | float > 10
+      failed_when: disk_latency.stdout | float > 10
+      ignore_errors: yes
+      register: disk_latency_check_result
+    - name: Record Disk Latency Failure
+      set_fact:
+        failures: "{{ failures + ['High Disk Latency: ' ~ disk_latency.stdout ~ ' ms'] }}"
+      when: disk_latency_check_result is failed
+
+    - name: Check Load Average
+      shell: "uptime | awk -F'load average:' '{ print $2 }' | cut -d',' -f1"
+      register: load_average
+      failed_when: false
+      changed_when: load_average.stdout | float > 1.0
+    - name: Evaluate Load Average
+      debug:
+        msg: "High Load Average: {{ load_average.stdout }}"
+      when: load_average.stdout | float > 1.0
+      failed_when: load_average.stdout | float > 1.0
+      ignore_errors: yes
+      register: load_average_check_result
+    - name: Record Load Average Failure
+      set_fact:
+        failures: "{{ failures + ['High Load Average: ' ~ load_average.stdout] }}"
+      when: load_average_check_result is failed
+
+    - name: Check Open File Descriptors
+      shell: "lsof | wc -l"
+      register: open_file_descriptors
+      failed_when: false
+      changed_when: open_file_descriptors.stdout | int > 1000
+    - name: Evaluate Open File Descriptors
+      debug:
+        msg: "Too many open file descriptors: {{ open_file_descriptors.stdout }}"
+      when: open_file_descriptors.stdout | int > 1000
+      failed_when: open_file_descriptors.stdout | int > 1000
+      ignore_errors: yes
+      register: open_file_descriptors_check_result
+    - name: Record Open File Descriptors Failure
+      set_fact:
+        failures: "{{ failures + ['Too many open file descriptors: ' ~ open_file_descriptors.stdout] }}"
+      when: open_file_descriptors_check_result is failed
+
+    - name: Check System Uptime
+      shell: "uptime -p | awk '{print $2}'"
+      register: system_uptime
+      failed_when: false
+    - name: Evaluate System Uptime
+      debug:
+        msg: "System uptime more than a day: {{ system_uptime.stdout }}"
+      when: system_uptime.stdout | regex_search('day')
+      failed_when: system_uptime.stdout | regex_search('day')
+      ignore_errors: yes
+      register: system_uptime_check_result
+    - name: Record System Uptime Failure
+      set_fact:
+        failures: "{{ failures + ['System uptime more than a day: ' ~ system_uptime.stdout] }}"
+      when: system_uptime_check_result is failed
+
+    - name: Check Active Connections
+      shell: "ss -tunlp | wc -l"
+      register: active_connections
+      failed_when: false
+      changed_when: active_connections.stdout | int > 100
+    - name: Evaluate Active Connections
+      debug:
+        msg: "Too many active connections: {{ active_connections.stdout }}"
+      when: active_connections.stdout | int > 100
+      failed_when: active_connections.stdout | int > 100
+      ignore_errors: yes
+      register: active_connections_check_result
+    - name: Record Active Connections Failure
+      set_fact:
+        failures: "{{ failures + ['Too many active connections: ' ~ active_connections.stdout] }}"
+      when: active_connections_check_result is failed
+
+    - name: Report Health Check Failures
+      debug:
+        msg: "{{ failures }}"
+      when: failures | length > 0
